@@ -128,25 +128,47 @@ void rst::rasterizer::rasterize_triangle(const Triangle& t) {
     
     // TODO : Find out the bounding box of current triangle.
     // iterate through the pixel and find if the current pixel is inside the triangle
-    const auto x_min = std::min(v[2].x(), std::min(v[0].x(), v[1].x()));
-    const auto x_max = std::max(v[2].x(), std::max(v[0].x(), v[1].x()));
-    const auto y_min = std::min(v[2].y(), std::min(v[0].y(), v[1].y()));
-    const auto y_max = std::max(v[2].y(), std::max(v[0].y(), v[1].y()));
+    const int x_min = std::floor(std::min({v[0].x(), v[1].x(), v[2].x()}));
+    const int x_max = std::ceil(std::max({v[0].x(), v[1].x(), v[2].x()}));
+    const int y_min = std::floor(std::min({v[0].y(), v[1].y(), v[2].y()}));
+    const int y_max = std::ceil(std::max({v[0].y(), v[1].y(), v[2].y()}));
+
+    const std::vector<std::pair<float, float>> offsets = {
+        {0.25f, 0.25f},
+        {0.75f, 0.25f},
+        {0.25f, 0.75f},
+        {0.75f, 0.75f}
+    };
 
     // TODO : set the current pixel (use the set_pixel function) to the color of the triangle (use getColor function) if it should be painted.
     for (int x = x_min; x <= x_max; x++)
     {
         for (int y = y_min; y <= y_max; y++)
         {
-            if (!insideTriangle(x, y, t.v)) continue;
-            const auto [alpha, beta, gamma] = computeBarycentric2D(x, y, t.v);
-            const float w_reciprocal = 1.0/(alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
-            float z_interpolated = alpha * v[0].z() / v[0].w() + beta * v[1].z() / v[1].w() + gamma * v[2].z() / v[2].w();
-            z_interpolated *= w_reciprocal;
-            const auto ind = x * width + y;
-            if (z_interpolated >= depth_buf[ind]) continue;
-            depth_buf[ind] = z_interpolated;
-            set_pixel(Vector3f(x, y, z_interpolated), t.getColor());
+            Vector3f color_sum(0, 0, 0);
+            auto sample_count = 0;
+
+            for (const auto&[fst, snd] : offsets)
+            {
+                float sx = x + fst;
+                float sy = y + snd;
+                if (!insideTriangle(sx, sy, t.v)) continue;
+                const auto [alpha, beta, gamma] = computeBarycentric2D(x, y, t.v);
+                const float w_reciprocal = 1.0/(alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
+                float z_interpolated = alpha * v[0].z() / v[0].w() + beta * v[1].z() / v[1].w() + gamma * v[2].z() / v[2].w();
+                z_interpolated *= w_reciprocal;
+                int sub_index = (x * 2 + static_cast<int>(fst * 2)) * width * 2 + (y * 2 + static_cast<int>(snd * 2));
+                if (z_interpolated < depth_buf[sub_index])
+                {
+                    depth_buf[sub_index] = z_interpolated;
+                    color_sum += t.getColor();
+                    sample_count++;
+                }
+            }
+            if (sample_count > 0)
+            {
+                set_pixel(Vector3f(x, y, 0), color_sum / sample_count);
+            }
         }
     }
 }
@@ -181,7 +203,7 @@ void rst::rasterizer::clear(rst::Buffers buff)
 rst::rasterizer::rasterizer(int w, int h) : width(w), height(h)
 {
     frame_buf.resize(w * h);
-    depth_buf.resize(w * h);
+    depth_buf.resize(4 * w * h);
 }
 
 int rst::rasterizer::get_index(int x, int y)
